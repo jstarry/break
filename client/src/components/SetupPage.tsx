@@ -56,7 +56,6 @@ export default function Setup() {
     clientId: CLIENT_ID,
     onSuccess: responseGoogle,
     onFailure: (err) => console.error("Failed to login", err),
-    isSignedIn: true,
   });
 
   React.useEffect(() => {
