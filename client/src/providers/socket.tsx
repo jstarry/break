@@ -100,10 +100,11 @@ export function useSocket() {
 }
 
 export function useActiveUsers() {
-  const context = React.useContext(ActiveUsersContext);
-  if (!context) {
-    throw new Error(`useActiveUsers must be used within a SocketProvider`);
-  }
+  return 1;
+  // const context = React.useContext(ActiveUsersContext);
+  // if (!context) {
+  //   throw new Error(`useActiveUsers must be used within a SocketProvider`);
+  // }
 
-  return context;
+  // return context;
 }

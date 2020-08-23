@@ -2,6 +2,7 @@ import { Account, PublicKey, Cluster, Connection } from "@solana/web3.js";
 
 export interface Config {
   cluster: Cluster | undefined;
+  clusterUrl: string;
   connection: Connection;
   programId: PublicKey;
   gameCost: number;
@@ -30,6 +31,7 @@ export function configFromInit(response: any): Config {
   const cluster = stringToCluster(response.cluster);
   return {
     cluster,
+    clusterUrl: response.clusterUrl,
     connection: new Connection(response.clusterUrl),
     programId: new PublicKey(response.programId),
     // Add 1 lamport because if the account is left with 0 lamports,

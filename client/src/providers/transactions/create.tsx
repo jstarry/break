@@ -10,13 +10,12 @@ import {
 } from "./index";
 import { AccountsConfig } from "../api/config";
 import { useConfig, useAccounts } from "providers/api";
-import { useBlockhash } from "providers/blockhash";
-import { useSocket } from "providers/socket";
 import { reportError } from "utils";
 import {
   CreateTransactionRPC,
   CreateTransactionResponseMessage,
 } from "../../workers/create-transaction-rpc";
+import { useWorkerState, WORKER } from "providers/worker";
 
 const SEND_TIMEOUT_MS = 45000;
 const RETRY_INTERVAL_MS = 500;
@@ -33,20 +32,18 @@ export function CreateTxProvider({ children }: ProviderProps) {
   const idCounter = React.useRef<number>(0);
   const targetSlotRef = useTargetSlotRef();
   const programDataAccount = accounts?.programAccounts[0].toBase58();
+  const workerState = useWorkerState();
 
   // Reset counter when program data accounts are refreshed
   React.useEffect(() => {
     idCounter.current = 0;
   }, [programDataAccount]);
 
-  const blockhash = useBlockhash();
   const dispatch = useDispatch();
-  const socket = useSocket();
   React.useEffect(() => {
     createTx.current = () => {
       if (
-        !blockhash ||
-        !socket ||
+        workerState === "loading" ||
         !config ||
         !accounts ||
         !targetSlotRef.current
@@ -56,13 +53,10 @@ export function CreateTxProvider({ children }: ProviderProps) {
       if (id < accounts.accountCapacity * accounts.programAccounts.length) {
         idCounter.current++;
         createTransaction(
-          blockhash,
           targetSlotRef.current,
-          config.programId,
           accounts,
           id,
           dispatch,
-          socket
         );
       } else {
         reportError(
@@ -71,7 +65,7 @@ export function CreateTxProvider({ children }: ProviderProps) {
         );
       }
     };
-  }, [blockhash, socket, config, accounts, dispatch, targetSlotRef]);
+  }, [config, accounts, workerState, dispatch, targetSlotRef]);
 
   return (
     <CreateTxContext.Provider value={createTx}>
@@ -80,16 +74,11 @@ export function CreateTxProvider({ children }: ProviderProps) {
   );
 }
 
-const workerRPC = new CreateTransactionRPC();
-
 export function createTransaction(
-  blockhash: Blockhash,
   targetSlot: number,
-  programId: PublicKey,
   accounts: AccountsConfig,
   trackingId: number,
   dispatch: Dispatch,
-  socket: WebSocket
 ) {
   const { feeAccounts, programAccounts } = accounts;
 
@@ -98,21 +87,15 @@ export function createTransaction(
   const programDataAccount = programAccounts[accountIndex];
   const feeAccount = feeAccounts[accountIndex];
 
-  workerRPC
+  WORKER
     .createTransaction({
+      type: "create",
       trackingId: trackingId,
-      blockhash: blockhash,
-      programId: programId.toBase58(),
-      programDataAccount: programDataAccount.toBase58(),
-      bitId: bitId,
-      feeAccountSecretKey: feeAccount.secretKey,
     })
     .then(
       (response: CreateTransactionResponseMessage) => {
-        const { signature, serializedTransaction } = response;
-
+        const { signature } = response;
         const sentAt = performance.now();
-
         const pendingTransaction: PendingTransaction = { sentAt, targetSlot };
         pendingTransaction.timeoutId = window.setTimeout(() => {
           dispatch({ type: "timeout", trackingId });
@@ -132,18 +115,18 @@ export function createTransaction(
           pendingTransaction,
         });
 
-        setTimeout(() => {
-          const retryUntil = new URLSearchParams(window.location.search).get(
-            "retry_until"
-          );
-          if (retryUntil === null || retryUntil !== "disabled") {
-            pendingTransaction.retryId = window.setInterval(() => {
-              if (socket.readyState === WebSocket.OPEN) {
-                socket.send(serializedTransaction);
-              }
-            }, RETRY_INTERVAL_MS);
-          }
-        }, 1);
+        // setTimeout(() => {
+        //   const retryUntil = new URLSearchParams(window.location.search).get(
+        //     "retry_until"
+        //   );
+        //   if (retryUntil === null || retryUntil !== "disabled") {
+        //     pendingTransaction.retryId = window.setInterval(() => {
+        //       if (socket.readyState === WebSocket.OPEN) {
+        //         socket.send(serializedTransaction);
+        //       }
+        //     }, RETRY_INTERVAL_MS);
+        //   }
+        // }, 1);
       },
       (error: any) => {
         console.error(error);

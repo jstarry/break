@@ -8,9 +8,9 @@ import {
   useClearAccounts,
   useConnection,
 } from "providers/api";
-import { useSocket } from "providers/socket";
-import { useBlockhash } from "providers/blockhash";
 import { useDispatch } from "providers/transactions";
+import { useWorkerState } from "./worker";
+import { useBlockhash } from "./blockhash";
 
 export const COUNTDOWN_SECS = 15;
 
@@ -31,10 +31,10 @@ export function GameStateProvider({ children }: Props) {
   const connection = useConnection();
   const history = useHistory();
   const location = useLocation();
-  const blockhash = useBlockhash();
+  const workerState = useWorkerState();
   const config = useConfig();
   const accounts = useAccounts();
-  const socket = useSocket();
+  const blockhash = useBlockhash();
   const isResultsRoute = !!useRouteMatch("/results");
   const isGameRoute = !!useRouteMatch("/game");
   const isFetching = useIsFetching();
@@ -47,7 +47,7 @@ export function GameStateProvider({ children }: Props) {
     const paymentRequired = config?.paymentRequired === true;
     const needsPayment = paymentRequired && !isFetching && !accounts;
     const doneLoading =
-      blockhash && config && socket && (needsPayment || accounts);
+      workerState === "ready" && config && (needsPayment || accounts);
     if (!doneLoading) {
       setGameState("loading");
     } else if (needsPayment) {
@@ -60,7 +60,7 @@ export function GameStateProvider({ children }: Props) {
         return gameState;
       });
     }
-  }, [isResultsRoute, isFetching, blockhash, config, accounts, socket]);
+  }, [isResultsRoute, isFetching, workerState, config, accounts]);
 
   React.useEffect(() => {
     if (countdown !== undefined) {

@@ -9,10 +9,10 @@ import "styles/index.scss";
 import App from "./app";
 import { ApiProvider } from "providers/api";
 import { BlockhashProvider } from "providers/blockhash";
+import { WorkerProvider } from "providers/worker";
 import { AccountProvider } from "providers/account";
 import { BalanceProvider } from "providers/balance";
 import { TransactionsProvider } from "providers/transactions";
-import { SocketProvider } from "providers/socket";
 import { GameStateProvider } from "providers/game";
 import { ServerProvider } from "providers/server";
 
@@ -34,8 +34,8 @@ ReactDOM.render(
       <ServerProvider>
         <AccountProvider>
           <ApiProvider>
-            <SocketProvider>
-              <BlockhashProvider>
+            <BlockhashProvider>
+              <WorkerProvider>
                 <BalanceProvider>
                   <TransactionsProvider>
                     <GameStateProvider>
@@ -43,8 +43,8 @@ ReactDOM.render(
                     </GameStateProvider>
                   </TransactionsProvider>
                 </BalanceProvider>
-              </BlockhashProvider>
-            </SocketProvider>
+              </WorkerProvider>
+            </BlockhashProvider>
           </ApiProvider>
         </AccountProvider>
       </ServerProvider>
