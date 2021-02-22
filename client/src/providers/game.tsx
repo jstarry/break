@@ -12,7 +12,7 @@ import { useBlockhash } from "providers/rpc/blockhash";
 import { useDispatch } from "providers/transactions";
 import { useConnection } from "./rpc";
 
-export const COUNTDOWN_SECS = 15;
+export const COUNTDOWN_SECS = 1500;
 
 type GameState = "loading" | "payment" | "play" | "reset";
 const GameStateContext = React.createContext<GameState | undefined>(undefined);

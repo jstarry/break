@@ -53,7 +53,8 @@ export function TransactionContainer({ enabled }: { enabled?: boolean }) {
   useEffect(() => {
     const testMode = new URLSearchParams(window.location.search).has("test");
     if (!testMode) return;
-    const testInterval = window.setInterval(() => makeTransaction(), 30);
+    makeTransaction();
+    const testInterval = window.setInterval(() => makeTransaction(), 1000);
     return () => clearInterval(testInterval);
   }, [makeTransaction]);
 
@@ -126,7 +127,8 @@ function InnerContainer() {
             <th className="text-muted">Target Slot</th>
             <th className="text-muted">Landed Slot</th>
             <th className="text-muted">Recent Conf Time</th>
-            <th className="text-muted">SingleGossip Conf Time</th>
+            <th className="text-muted">(Pubsub) SingleGossip Conf Time</th>
+            <th className="text-muted">(Poll) SingleGossip Conf Time</th>
             <th className="text-muted">Single Conf Time</th>
           </tr>
         </thead>

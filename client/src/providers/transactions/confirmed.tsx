@@ -37,34 +37,35 @@ export function ConfirmedHelper({ children }: Props) {
     const commitments = subscribedCommitments();
     const partitionCount = accounts.programAccounts.length;
 
-    const accountSubscriptions = accounts.programAccounts.map(
-      (account, partition) =>
-        commitments.map((commitment) =>
-          connection.onAccountChange(
-            account,
-            (accountInfo: AccountInfo<Buffer>, { slot }) => {
-              const ids = new Set(Bytes.programDataToIds(accountInfo.data));
-              const activeIdPartition = {
-                ids,
-                partition,
-                partitionCount,
-              };
-              dispatch({
-                type: "update",
-                activeIdPartition,
-                commitment,
-                estimatedSlot: slot,
-                receivedAt: performance.now(),
-              });
-            },
-            commitment
-          )
-        )
-    );
+    const accountSubscriptions: any[] = [];
+    // const accountSubscriptions = accounts.programAccounts.map(
+    //   (account, partition) =>
+    //     commitments.map((commitment) =>
+    //       connection.onAccountChange(
+    //         account,
+    //         (accountInfo: AccountInfo<Buffer>, { slot }) => {
+    //           const ids = new Set(Bytes.programDataToIds(accountInfo.data));
+    //           const activeIdPartition = {
+    //             ids,
+    //             partition,
+    //             partitionCount,
+    //           };
+    //           dispatch({
+    //             type: "update",
+    //             activeIdPartition,
+    //             commitment,
+    //             estimatedSlot: slot,
+    //             receivedAt: performance.now(),
+    //           });
+    //         },
+    //         commitment
+    //       )
+    //     )
+    // );
 
     return () => {
       accountSubscriptions.forEach((listeners) => {
-        listeners.forEach((listener) => {
+        listeners.forEach((listener: any) => {
           connection.removeAccountChangeListener(listener);
         });
       });

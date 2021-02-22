@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Blockhash, PublicKey } from "@solana/web3.js";
+import { Blockhash, PublicKey, Connection } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
   Dispatch,
@@ -17,6 +17,7 @@ import { useConfig, useAccounts } from "providers/server/http";
 import { useBlockhash } from "providers/rpc/blockhash";
 import { useSocket } from "providers/server/socket";
 import { reportError } from "utils";
+import { useConnection } from "providers/rpc";
 
 const SEND_TIMEOUT_MS = 45000;
 const RETRY_INTERVAL_MS = 500;
@@ -40,12 +41,14 @@ export function CreateTxProvider({ children }: ProviderProps) {
     idCounter.current = 0;
   }, [programDataAccount]);
 
+  const connection = useConnection();
   const blockhash = useBlockhash();
   const dispatch = useDispatch();
   const socket = useSocket();
   React.useEffect(() => {
     createTx.current = () => {
       if (
+        !connection ||
         !blockhash ||
         !socket ||
         !config ||
@@ -57,6 +60,7 @@ export function CreateTxProvider({ children }: ProviderProps) {
       if (id < accounts.accountCapacity * accounts.programAccounts.length) {
         idCounter.current++;
         createTransaction(
+          connection,
           blockhash,
           targetSlotRef.current,
           config.programId,
@@ -72,7 +76,15 @@ export function CreateTxProvider({ children }: ProviderProps) {
         );
       }
     };
-  }, [blockhash, socket, config, accounts, dispatch, targetSlotRef]);
+  }, [
+    blockhash,
+    connection,
+    socket,
+    config,
+    accounts,
+    dispatch,
+    targetSlotRef,
+  ]);
 
   return (
     <CreateTxContext.Provider value={createTx}>
@@ -82,6 +94,7 @@ export function CreateTxProvider({ children }: ProviderProps) {
 }
 
 export function createTransaction(
+  connection: Connection,
   blockhash: Blockhash,
   targetSlot: number,
   programId: PublicKey,
@@ -118,12 +131,26 @@ export function createTransaction(
           dispatch({ type: "timeout", trackingId });
         }, SEND_TIMEOUT_MS);
 
+        const encodedSignature = bs58.encode(signature);
         const details: TransactionDetails = {
           id: bitId,
           feeAccount: feeAccount.publicKey,
           programAccount: programDataAccount,
-          signature: bs58.encode(signature),
+          signature: encodedSignature,
         };
+
+        connection.onSignature(
+          encodedSignature,
+          (result: any, context: any) => {
+            dispatch({
+              type: "signature",
+              trackingId,
+              estimatedSlot: context.slot,
+              receivedAt: performance.now(),
+            });
+          },
+          "singleGossip"
+        );
 
         dispatch({
           type: "new",
