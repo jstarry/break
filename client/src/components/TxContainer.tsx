@@ -125,11 +125,11 @@ function InnerContainer() {
           <tr>
             <th className="text-muted">Transaction</th>
             <th className="text-muted">Target Slot</th>
+            <th className="text-muted">Received Slot</th>
             <th className="text-muted">Landed Slot</th>
-            <th className="text-muted">Recent Conf Time</th>
-            <th className="text-muted">(Pubsub) SingleGossip Conf Time</th>
-            <th className="text-muted">(Poll) SingleGossip Conf Time</th>
-            <th className="text-muted">Single Conf Time</th>
+            <th className="text-muted">Received</th>
+            <th className="text-muted">Processed</th>
+            <th className="text-muted">Confirmed</th>
           </tr>
         </thead>
         <tbody className="list">

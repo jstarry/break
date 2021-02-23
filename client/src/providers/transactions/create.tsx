@@ -18,6 +18,7 @@ import { useBlockhash } from "providers/rpc/blockhash";
 import { useSocket } from "providers/server/socket";
 import { reportError } from "utils";
 import { useConnection } from "providers/rpc";
+import { DEBUG_MODE } from "./confirmed";
 
 const SEND_TIMEOUT_MS = 45000;
 const RETRY_INTERVAL_MS = 500;
@@ -139,18 +140,33 @@ export function createTransaction(
           signature: encodedSignature,
         };
 
-        connection.onSignature(
-          encodedSignature,
-          (result: any, context: any) => {
-            dispatch({
-              type: "signature",
-              trackingId,
-              estimatedSlot: context.slot,
-              receivedAt: performance.now(),
-            });
-          },
-          "singleGossip"
-        );
+        if (DEBUG_MODE) {
+          (connection as any).onTransaction(
+            encodedSignature,
+            (notification: any, context: any) => {
+              console.log({notification});
+              if (notification.type === "received") {
+                dispatch({
+                  type: "received",
+                  trackingId,
+                  slot: context.slot,
+                  receivedAt: performance.now(),
+                });
+              } else {
+                dispatch({
+                  type: "signature",
+                  trackingId,
+                  estimatedSlot: context.slot,
+                  receivedAt: performance.now(),
+                });
+              }
+            },
+            {
+              commitment: "singleGossip",
+              enableReceivedNotification: true,
+            }
+          );
+        }
 
         dispatch({
           type: "new",

@@ -7,6 +7,11 @@ import { CreateTxContext, CreateTxProvider } from "./create";
 import { SelectedTxProvider } from "./selected";
 import { useConnection } from "providers/rpc";
 
+export type ReceivedRecord = {
+  receivedAt: number;
+  slot: number;
+};
+
 export type PendingTransaction = {
   sentAt: number;
   targetSlot: number;
@@ -23,15 +28,26 @@ export type TransactionDetails = {
 
 type Timing = {
   sentAt: number;
-  recent?: number;
-  single?: number;
-  singleGossip?: number;
-  gossipSignature?: number;
+  processed?: number;
+  confirmed?: number;
+};
+
+type TimeoutState = {
+  status: "timeout";
+  details: TransactionDetails;
+};
+
+type PendingState = {
+  status: "pending";
+  details: TransactionDetails;
+  received: Array<ReceivedRecord>;
+  pending: PendingTransaction;
 };
 
 type SuccessState = {
   status: "success";
   details: TransactionDetails;
+  received: Array<ReceivedRecord>;
   slot: {
     target: number;
     landed?: number;
@@ -46,8 +62,7 @@ export const COMMITMENT_PARAM = ((): TrackedCommitment => {
     "commitment"
   );
   switch (commitment) {
-    case "recent":
-    case "single": {
+    case "recent": {
       return commitment;
     }
     default: {
@@ -56,18 +71,17 @@ export const COMMITMENT_PARAM = ((): TrackedCommitment => {
   }
 })();
 
-export type TrackedCommitment = "single" | "singleGossip" | "recent";
-
-type TimeoutState = {
-  status: "timeout";
-  details: TransactionDetails;
+export const getCommitmentName = (commitment: TrackedCommitment): CommitmentName => {
+  if (commitment === "singleGossip") {
+    return "confirmed";
+  } else {
+    return "processed";
+  }
 };
 
-type PendingState = {
-  status: "pending";
-  pending: PendingTransaction;
-  details: TransactionDetails;
-};
+export type CommitmentName = "processed" | "confirmed";
+
+export type TrackedCommitment = "singleGossip" | "recent";
 
 export type TransactionStatus = "success" | "timeout" | "pending";
 
@@ -93,7 +107,7 @@ type UpdateIds = {
   estimatedSlot: number;
 };
 
-type SignatureConf = {
+type SignatureConfirmed = {
   type: "signature";
   trackingId: number;
   estimatedSlot: number;
@@ -127,6 +141,13 @@ type RecordRoot = {
   root: number;
 };
 
+type SignatureReceived = {
+  type: "received";
+  trackingId: number;
+  slot: number;
+  receivedAt: number;
+};
+
 type Action =
   | NewTransaction
   | UpdateIds
@@ -134,7 +155,8 @@ type Action =
   | ResetState
   | RecordRoot
   | LandedTxs
-  | SignatureConf;
+  | SignatureConfirmed
+  | SignatureReceived;
 
 type State = TransactionState[];
 function reducer(state: State, action: Action): State {
@@ -146,9 +168,33 @@ function reducer(state: State, action: Action): State {
         {
           details,
           status: "pending",
+          received: [],
           pending: pendingTransaction,
         },
       ];
+    }
+
+    case "received": {
+      const trackingId = action.trackingId;
+      if (trackingId >= state.length) return state;
+      const transaction = state[trackingId];
+      return state.map((tx) => {
+        if (tx.details.signature === transaction.details.signature) {
+          if (tx.status !== "timeout") {
+            return {
+              ...tx,
+              received: [
+                ...tx.received,
+                {
+                  slot: action.slot,
+                  receivedAt: action.receivedAt
+                }
+              ],
+            };
+          }
+        }
+        return tx;
+      });
     }
 
     case "signature": {
@@ -162,25 +208,27 @@ function reducer(state: State, action: Action): State {
             return {
               status: "success",
               details: tx.details,
+              received: tx.received,
               slot: {
                 target: tx.pending.targetSlot,
                 estimated: action.estimatedSlot,
               },
               timing: {
                 sentAt: tx.pending.sentAt,
-                gossipSignature: timeElapsed(
+                confirmed: timeElapsed(
                   tx.pending.sentAt,
                   action.receivedAt
                 ),
               },
               pending: tx.pending,
             };
+
           } else if (tx.status === "success") {
             return {
               ...tx,
               timing: {
                 ...tx.timing,
-                gossipSignature: timeElapsed(
+                confirmed: timeElapsed(
                   tx.timing.sentAt,
                   action.receivedAt
                 ),
@@ -217,11 +265,9 @@ function reducer(state: State, action: Action): State {
         if (trackingId % partitionCount !== partition) return tx;
         const id = Math.floor(trackingId / partitionCount);
         if (tx.status === "pending" && ids.has(id)) {
+
           // Optimistically confirmed, no need to continue retry
-          if (
-            action.commitment === "singleGossip" ||
-            action.commitment === "single"
-          ) {
+          if (action.commitment === "singleGossip") {
             clearInterval(tx.pending.retryId);
             clearTimeout(tx.pending.timeoutId);
           }
@@ -229,6 +275,7 @@ function reducer(state: State, action: Action): State {
           return {
             status: "success",
             details: tx.details,
+            received: tx.received,
             slot: {
               target: tx.pending.targetSlot,
               estimated: action.estimatedSlot,
@@ -244,17 +291,14 @@ function reducer(state: State, action: Action): State {
           };
         } else if (tx.status === "success") {
           if (ids.has(id)) {
+            const commitmentName = getCommitmentName(action.commitment);
             // Already recorded conf time
-            if (tx.timing[action.commitment] !== undefined) {
+            if (tx.timing[commitmentName] !== undefined) {
               return tx;
             }
 
             // Optimistically confirmed, no need to continue retry
-            if (
-              tx.pending &&
-              (action.commitment === "singleGossip" ||
-                action.commitment === "single")
-            ) {
+            if (tx.pending && action.commitment === "singleGossip") {
               clearInterval(tx.pending.retryId);
               clearTimeout(tx.pending.timeoutId);
             }
@@ -263,7 +307,7 @@ function reducer(state: State, action: Action): State {
               ...tx,
               timing: {
                 ...tx.timing,
-                [action.commitment]: timeElapsed(
+                [commitmentName]: timeElapsed(
                   tx.timing.sentAt,
                   action.receivedAt
                 ),
@@ -275,15 +319,12 @@ function reducer(state: State, action: Action): State {
             !ids.has(id)
           ) {
             // Don't revert to pending state if we already received timing info for other commitments
-            if (
-              tx.timing["single"] !== undefined ||
-              tx.timing["singleGossip"] !== undefined
-            ) {
+            if (tx.timing["confirmed"] !== undefined) {
               return {
                 ...tx,
                 timing: {
                   ...tx.timing,
-                  recent: undefined,
+                  processed: undefined,
                 },
               };
             }
@@ -292,6 +333,7 @@ function reducer(state: State, action: Action): State {
             return {
               status: "pending",
               details: tx.details,
+              received: tx.received,
               pending: { ...tx.pending },
             };
           }
@@ -521,7 +563,7 @@ export function useAvgConfirmationTime() {
 
   const confirmed = state.reduce((confirmed: number[], tx) => {
     if (tx.status === "success") {
-      const confTime = tx.timing[COMMITMENT_PARAM];
+      const confTime = tx.timing[getCommitmentName(COMMITMENT_PARAM)];
       if (confTime !== undefined) confirmed.push(confTime);
     }
     return confirmed;
