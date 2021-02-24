@@ -12,7 +12,7 @@ export const DEBUG_MODE = new URLSearchParams(window.location.search).has(
 
 // Determine commitment levels to subscribe to. "singleGossip" is used
 // to stop tx send retries so it must be returned
-const subscribedCommitments = (): TrackedCommitment[] => {
+export const subscribedCommitments = (): TrackedCommitment[] => {
   if (DEBUG_MODE) return ["recent", "singleGossip"];
   switch (COMMITMENT_PARAM) {
     case "recent": {
@@ -32,6 +32,7 @@ export function ConfirmedHelper({ children }: Props) {
 
   React.useEffect(() => {
     if (connection === undefined || accounts === undefined) return;
+    if (DEBUG_MODE) return;
 
     const commitments = subscribedCommitments();
     const partitionCount = accounts.programAccounts.length;

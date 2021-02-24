@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useThrottle } from "@react-hook/throttle";
 import { TransactionSignature, PublicKey } from "@solana/web3.js";
-import { ConfirmedHelper, DEBUG_MODE } from "./confirmed";
+import { ConfirmedHelper } from "./confirmed";
 import { TpsProvider, TpsContext } from "./tps";
 import { CreateTxContext, CreateTxProvider } from "./create";
 import { SelectedTxProvider } from "./selected";
@@ -50,8 +50,7 @@ type SuccessState = {
   received: Array<ReceivedRecord>;
   slot: {
     target: number;
-    landed?: number;
-    estimated: number;
+    landed: number;
   };
   timing: Timing;
   pending?: PendingTransaction;
@@ -71,7 +70,9 @@ export const COMMITMENT_PARAM = ((): TrackedCommitment => {
   }
 })();
 
-export const getCommitmentName = (commitment: TrackedCommitment): CommitmentName => {
+export const getCommitmentName = (
+  commitment: TrackedCommitment
+): CommitmentName => {
   if (commitment === "singleGossip") {
     return "confirmed";
   } else {
@@ -87,13 +88,12 @@ export type TransactionStatus = "success" | "timeout" | "pending";
 
 export type TransactionState = SuccessState | TimeoutState | PendingState;
 
-export type ActionType =
-  | "new"
-  | "update"
-  | "timeout"
-  | "reset"
-  | "root"
-  | "landed";
+type NewTransaction = {
+  type: "new";
+  trackingId: number;
+  details: TransactionDetails;
+  pendingTransaction: PendingTransaction;
+};
 
 type UpdateIds = {
   type: "update";
@@ -107,24 +107,12 @@ type UpdateIds = {
   estimatedSlot: number;
 };
 
-type SignatureConfirmed = {
-  type: "signature";
+type TrackTransaction = {
+  type: "track";
+  commitmentName: CommitmentName;
   trackingId: number;
-  estimatedSlot: number;
+  slot: number;
   receivedAt: number;
-};
-
-type LandedTxs = {
-  type: "landed";
-  signatures: TransactionSignature[];
-  slots: number[];
-};
-
-type NewTransaction = {
-  type: "new";
-  trackingId: number;
-  details: TransactionDetails;
-  pendingTransaction: PendingTransaction;
 };
 
 type TimeoutTransaction = {
@@ -154,8 +142,7 @@ type Action =
   | TimeoutTransaction
   | ResetState
   | RecordRoot
-  | LandedTxs
-  | SignatureConfirmed
+  | TrackTransaction
   | SignatureReceived;
 
 type State = TransactionState[];
@@ -187,8 +174,8 @@ function reducer(state: State, action: Action): State {
                 ...tx.received,
                 {
                   slot: action.slot,
-                  receivedAt: action.receivedAt
-                }
+                  receivedAt: action.receivedAt,
+                },
               ],
             };
           }
@@ -197,7 +184,7 @@ function reducer(state: State, action: Action): State {
       });
     }
 
-    case "signature": {
+    case "track": {
       const trackingId = action.trackingId;
       if (trackingId >= state.length) return state;
       const transaction = state[trackingId];
@@ -211,24 +198,27 @@ function reducer(state: State, action: Action): State {
               received: tx.received,
               slot: {
                 target: tx.pending.targetSlot,
-                estimated: action.estimatedSlot,
+                landed: action.slot,
               },
               timing: {
                 sentAt: tx.pending.sentAt,
-                confirmed: timeElapsed(
+                [action.commitmentName]: timeElapsed(
                   tx.pending.sentAt,
                   action.receivedAt
                 ),
               },
               pending: tx.pending,
             };
-
           } else if (tx.status === "success") {
             return {
               ...tx,
+              slot: {
+                ...tx.slot,
+                landed: action.slot,
+              },
               timing: {
                 ...tx.timing,
-                confirmed: timeElapsed(
+                [action.commitmentName]: timeElapsed(
                   tx.timing.sentAt,
                   action.receivedAt
                 ),
@@ -265,24 +255,24 @@ function reducer(state: State, action: Action): State {
         if (trackingId % partitionCount !== partition) return tx;
         const id = Math.floor(trackingId / partitionCount);
         if (tx.status === "pending" && ids.has(id)) {
-
           // Optimistically confirmed, no need to continue retry
           if (action.commitment === "singleGossip") {
             clearInterval(tx.pending.retryId);
             clearTimeout(tx.pending.timeoutId);
           }
 
+          const commitmentName = getCommitmentName(action.commitment);
           return {
             status: "success",
             details: tx.details,
             received: tx.received,
             slot: {
               target: tx.pending.targetSlot,
-              estimated: action.estimatedSlot,
+              landed: action.estimatedSlot,
             },
             timing: {
               sentAt: tx.pending.sentAt,
-              [action.commitment]: timeElapsed(
+              [commitmentName]: timeElapsed(
                 tx.pending.sentAt,
                 action.receivedAt
               ),
@@ -358,8 +348,7 @@ function reducer(state: State, action: Action): State {
     case "root": {
       const foundRooted = state.find((tx) => {
         if (tx.status === "success" && tx.pending) {
-          const landedSlot = !DEBUG_MODE ? tx.slot.estimated : tx.slot.landed;
-          return landedSlot === action.root;
+          return tx.slot.landed === action.root;
         } else {
           return false;
         }
@@ -370,8 +359,7 @@ function reducer(state: State, action: Action): State {
 
       return state.map((tx) => {
         if (tx.status === "success" && tx.pending) {
-          const landedSlot = !DEBUG_MODE ? tx.slot.estimated : tx.slot.landed;
-          if (landedSlot === action.root) {
+          if (tx.slot.landed === action.root) {
             clearInterval(tx.pending.retryId);
             clearTimeout(tx.pending.timeoutId);
             return {
@@ -383,33 +371,10 @@ function reducer(state: State, action: Action): State {
         return tx;
       });
     }
-
-    case "landed": {
-      return state.map((tx) => {
-        if (tx.status === "success") {
-          const index = action.signatures.findIndex(
-            (val) => val === tx.details.signature
-          );
-          if (index >= 0) {
-            return {
-              ...tx,
-              slot: {
-                ...tx.slot,
-                landed: action.slots[index],
-              },
-            };
-          }
-        }
-        return tx;
-      });
-    }
   }
 }
 
 export type Dispatch = (action: Action) => void;
-const SlotContext = React.createContext<
-  React.MutableRefObject<number | undefined> | undefined
->(undefined);
 const StateContext = React.createContext<State | undefined>(undefined);
 const DispatchContext = React.createContext<Dispatch | undefined>(undefined);
 
@@ -417,7 +382,6 @@ type ProviderProps = { children: React.ReactNode };
 export function TransactionsProvider({ children }: ProviderProps) {
   const [state, dispatch] = React.useReducer(reducer, []);
   const connection = useConnection();
-  const targetSlot = React.useRef<number>();
   const stateRef = React.useRef(state);
 
   React.useEffect(() => {
@@ -430,46 +394,12 @@ export function TransactionsProvider({ children }: ProviderProps) {
     });
 
     if (connection === undefined) return;
-    const slotSubscription = connection.onSlotChange(({ slot }) => {
-      targetSlot.current = slot;
-    });
     const rootSubscription = connection.onRootChange((root) => {
       dispatch({ type: "root", root });
     });
 
-    // Poll for signature statuses to determine which slot a tx landed in
-    const intervalId = DEBUG_MODE
-      ? setInterval(async () => {
-          const fetchStatuses: string[] = [];
-          stateRef.current.forEach((tx) => {
-            if (tx.status === "success" && tx.slot.landed === undefined) {
-              fetchStatuses.push(tx.details.signature);
-            }
-          });
-
-          if (fetchStatuses.length === 0) return;
-
-          const slots: number[] = [];
-          const signatures: TransactionSignature[] = [];
-          const statuses = (
-            await connection.getSignatureStatuses(fetchStatuses)
-          ).value;
-          for (var i = 0; i < statuses.length; i++) {
-            const status = statuses[i];
-            if (status !== null) {
-              slots.push(status.slot);
-              signatures.push(fetchStatuses[i]);
-            }
-          }
-          if (slots.length === 0) return;
-          dispatch({ type: "landed", slots, signatures });
-        }, 2000)
-      : undefined;
-
     return () => {
-      connection.removeSlotChangeListener(slotSubscription);
       connection.removeRootChangeListener(rootSubscription);
-      intervalId !== undefined && clearInterval(intervalId);
     };
   }, [connection]);
 
@@ -481,15 +411,13 @@ export function TransactionsProvider({ children }: ProviderProps) {
   return (
     <StateContext.Provider value={throttledState}>
       <DispatchContext.Provider value={dispatch}>
-        <SlotContext.Provider value={targetSlot}>
-          <SelectedTxProvider>
-            <CreateTxProvider>
-              <ConfirmedHelper>
-                <TpsProvider>{children}</TpsProvider>
-              </ConfirmedHelper>
-            </CreateTxProvider>
-          </SelectedTxProvider>
-        </SlotContext.Provider>
+        <SelectedTxProvider>
+          <CreateTxProvider>
+            <ConfirmedHelper>
+              <TpsProvider>{children}</TpsProvider>
+            </ConfirmedHelper>
+          </CreateTxProvider>
+        </SelectedTxProvider>
       </DispatchContext.Provider>
     </StateContext.Provider>
   );
@@ -506,17 +434,6 @@ export function useDispatch() {
   const dispatch = React.useContext(DispatchContext);
   if (!dispatch) {
     throw new Error(`useDispatch must be used within a TransactionsProvider`);
-  }
-
-  return dispatch;
-}
-
-export function useTargetSlotRef() {
-  const dispatch = React.useContext(SlotContext);
-  if (!dispatch) {
-    throw new Error(
-      `useTargetSlotRef must be used within a TransactionsProvider`
-    );
   }
 
   return dispatch;

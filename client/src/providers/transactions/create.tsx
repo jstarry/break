@@ -3,9 +3,9 @@ import { Blockhash, PublicKey, Connection } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
   Dispatch,
+  getCommitmentName,
   PendingTransaction,
   TransactionDetails,
-  useTargetSlotRef,
   useDispatch,
 } from "./index";
 import { AccountsConfig } from "../server/http/config";
@@ -18,7 +18,8 @@ import { useBlockhash } from "providers/rpc/blockhash";
 import { useSocket } from "providers/server/socket";
 import { reportError } from "utils";
 import { useConnection } from "providers/rpc";
-import { DEBUG_MODE } from "./confirmed";
+import { DEBUG_MODE, subscribedCommitments } from "./confirmed";
+import { useTargetSlotRef } from "providers/slot";
 
 const SEND_TIMEOUT_MS = 45000;
 const RETRY_INTERVAL_MS = 500;
@@ -141,10 +142,9 @@ export function createTransaction(
         };
 
         if (DEBUG_MODE) {
-          (connection as any).onTransaction(
+          const maxId = (connection as any).onTransaction(
             encodedSignature,
             (notification: any, context: any) => {
-              console.log({notification});
               if (notification.type === "received") {
                 dispatch({
                   type: "received",
@@ -152,20 +152,32 @@ export function createTransaction(
                   slot: context.slot,
                   receivedAt: performance.now(),
                 });
-              } else {
-                dispatch({
-                  type: "signature",
-                  trackingId,
-                  estimatedSlot: context.slot,
-                  receivedAt: performance.now(),
-                });
+                connection.removeSignatureListener(maxId);
               }
             },
             {
-              commitment: "singleGossip",
+              commitment: "max",
               enableReceivedNotification: true,
             }
           );
+
+          const commitments = subscribedCommitments();
+          commitments.forEach((commitment) => {
+            (connection as any).onTransaction(
+              encodedSignature,
+              (notification: any, context: any) => {
+                const commitmentName = getCommitmentName(commitment);
+                dispatch({
+                  type: "track",
+                  commitmentName,
+                  trackingId,
+                  slot: context.slot,
+                  receivedAt: performance.now(),
+                });
+              },
+              { commitment }
+            );
+          });
         }
 
         dispatch({
