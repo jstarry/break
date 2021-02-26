@@ -1,5 +1,9 @@
 import * as React from "react";
-import { TransactionState, COMMITMENT_PARAM } from "providers/transactions";
+import {
+  TransactionState,
+  COMMITMENT_PARAM,
+  getCommitmentName,
+} from "providers/transactions";
 import {
   useSelectTransaction,
   useSelectedTransaction,
@@ -147,7 +151,7 @@ export function TransactionDetails({
       return <span className="text-warning">Timed out</span>;
     }
     if (transaction.status === "success") {
-      const confTime = transaction.timing[COMMITMENT_PARAM];
+      const confTime = transaction.timing[getCommitmentName(COMMITMENT_PARAM)];
       if (confTime) {
         return <span className="text-success">{confTime} sec</span>;
       }
@@ -171,7 +175,7 @@ export function TransactionDetails({
       {transaction.status === "success" && (
         <div className="d-flex justify-content-between mb-4">
           <div className="">Confirmed Block</div>
-          {transaction.slot.estimated}
+          {transaction.slot.landed}
         </div>
       )}
       <div className="d-flex justify-content-between">

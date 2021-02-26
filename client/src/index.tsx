@@ -12,6 +12,7 @@ import { TransactionsProvider } from "providers/transactions";
 import { GameStateProvider } from "providers/game";
 import { ServerProvider } from "providers/server";
 import { RpcProvider } from "providers/rpc";
+import { SlotProvider } from "providers/slot";
 
 if (process.env.NODE_ENV === "production") {
   Sentry.init({
@@ -27,11 +28,13 @@ ReactDOM.render(
     <WalletProvider>
       <ServerProvider>
         <RpcProvider>
-          <TransactionsProvider>
-            <GameStateProvider>
-              <App />
-            </GameStateProvider>
-          </TransactionsProvider>
+          <SlotProvider>
+            <TransactionsProvider>
+              <GameStateProvider>
+                <App />
+              </GameStateProvider>
+            </TransactionsProvider>
+          </SlotProvider>
         </RpcProvider>
       </ServerProvider>
     </WalletProvider>
