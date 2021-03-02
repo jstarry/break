@@ -126,9 +126,8 @@ export function createTransaction(
         const { signature, serializedTransaction } = response;
 
         socket.send(serializedTransaction);
-        const sentAt = performance.now();
 
-        const pendingTransaction: PendingTransaction = { sentAt, targetSlot };
+        const pendingTransaction: PendingTransaction = { targetSlot };
         pendingTransaction.timeoutId = window.setTimeout(() => {
           dispatch({ type: "timeout", trackingId });
         }, SEND_TIMEOUT_MS);
@@ -141,16 +140,31 @@ export function createTransaction(
           signature: encodedSignature,
         };
 
+        dispatch({
+          type: "new",
+          details,
+          trackingId,
+          pendingTransaction,
+        });
+
         if (DEBUG_MODE) {
           (connection as any).onTransaction(
             encodedSignature,
             (notification: any, context: any) => {
-              if (notification.type === "received") {
+              if (notification.type === "subscribedSignature") {
                 dispatch({
-                  type: "received",
+                  type: "subscribed",
+                  timestamp: notification.timestamp,
                   trackingId,
                   slot: context.slot,
-                  receivedAt: performance.now(),
+                });
+              } else if (notification.type === "receivedSignature") {
+                console.log(encodedSignature, notification, context);
+                dispatch({
+                  type: "received",
+                  timestamp: notification.timestamp,
+                  trackingId,
+                  slot: context.slot,
                 });
               }
             },
@@ -165,26 +179,21 @@ export function createTransaction(
             (connection as any).onTransaction(
               encodedSignature,
               (notification: any, context: any) => {
-                const commitmentName = getCommitmentName(commitment);
-                dispatch({
-                  type: "track",
-                  commitmentName,
-                  trackingId,
-                  slot: context.slot,
-                  receivedAt: performance.now(),
-                });
+                if (notification.type === "processedSignature") {
+                  const commitmentName = getCommitmentName(commitment);
+                  dispatch({
+                    type: "track",
+                    commitmentName,
+                    trackingId,
+                    slot: context.slot,
+                    timestamp: notification.timestamp,
+                  });
+                }
               },
               { commitment }
             );
           });
         }
-
-        dispatch({
-          type: "new",
-          details,
-          trackingId,
-          pendingTransaction,
-        });
 
         const retry = new URLSearchParams(window.location.search).get("retry");
         if (retry === null || retry !== "disabled") {

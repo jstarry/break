@@ -13,7 +13,7 @@ export const DEBUG_MODE = new URLSearchParams(window.location.search).has(
 // Determine commitment levels to subscribe to. "singleGossip" is used
 // to stop tx send retries so it must be returned
 export const subscribedCommitments = (): TrackedCommitment[] => {
-  if (DEBUG_MODE) return ["recent", "singleGossip"];
+  if (DEBUG_MODE) return ["singleGossip"];
   switch (COMMITMENT_PARAM) {
     case "recent": {
       return [COMMITMENT_PARAM, "singleGossip"];

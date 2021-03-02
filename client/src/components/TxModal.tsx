@@ -1,14 +1,12 @@
 import * as React from "react";
-import {
-  TransactionState,
-  COMMITMENT_PARAM,
-  getCommitmentName,
-} from "providers/transactions";
+import { TransactionState } from "providers/transactions";
 import {
   useSelectTransaction,
   useSelectedTransaction,
 } from "providers/transactions/selected";
 import { useClusterParam } from "providers/server/http";
+import { useSlotTiming } from "providers/slot";
+import { timeElapsed } from "./TxTableRow";
 
 export function TransactionModal() {
   const selectedTx = useSelectedTransaction();
@@ -61,6 +59,7 @@ export function TransactionDetails({
   transaction: TransactionState;
 }) {
   const clusterParam = useClusterParam();
+  const slotMetrics = useSlotTiming();
   const { signature, feeAccount, programAccount } = transaction.details;
   const explorerLink = (path: string) =>
     `https://explorer.solana.com/${path}?${clusterParam}`;
@@ -151,9 +150,14 @@ export function TransactionDetails({
       return <span className="text-warning">Timed out</span>;
     }
     if (transaction.status === "success") {
-      const confTime = transaction.timing[getCommitmentName(COMMITMENT_PARAM)];
-      if (confTime) {
-        return <span className="text-success">{confTime} sec</span>;
+      const subscribed = transaction.timing.subscribed;
+      if (subscribed !== undefined && transaction.slot.landed !== undefined) {
+        const slotTiming = slotMetrics.current.get(transaction.slot.landed);
+        const confirmed = slotTiming?.confirmed;
+        const confTime = timeElapsed(subscribed, confirmed);
+        if (confTime) {
+          return <span className="text-success">{confTime} sec</span>;
+        }
       }
     }
     return (

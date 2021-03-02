@@ -10,12 +10,12 @@ interface Props {
   transaction: TransactionState;
 }
 
-function timeElapsed(
+export function timeElapsed(
   sentAt: number | undefined,
   receivedAt: number | undefined
 ): string | undefined {
   if (sentAt === undefined || receivedAt === undefined) return;
-  return parseFloat(((receivedAt - sentAt) / 1000).toFixed(3)) + "s";
+  return (Math.max(0, receivedAt - sentAt) / 1000).toFixed(3) + "s";
 }
 
 export function TxTableRow({ transaction }: Props) {
@@ -24,40 +24,47 @@ export function TxTableRow({ transaction }: Props) {
   const slotMetrics = useSlotTiming();
 
   let targetSlot;
-  let landedSlot;
+  let landedSlot: number | undefined;
+  let timing;
+  let received;
   if (transaction.status === "success") {
     targetSlot = transaction.slot.target;
     landedSlot = transaction.slot.landed;
+    timing = transaction.timing;
+    received = transaction.received;
   } else if (transaction.status === "timeout") {
   } else {
     targetSlot = transaction.pending.targetSlot;
+    timing = transaction.timing;
+    received = transaction.received;
   }
 
   let slotTiming: SlotTiming | undefined;
+  let landedTime: number | undefined;
   if (landedSlot !== undefined) {
+    landedTime = received?.find((r) => r.slot === landedSlot)?.timestamp;
     slotTiming = slotMetrics.current.get(landedSlot);
   }
 
   return (
-    <tr className="debug-row" onClick={() => selectTransaction(signature)}>
-      <td className="text-monospace">{signature.slice(0, 7)}…</td>
+    <tr
+      className="debug-row text-monospace"
+      onClick={() => selectTransaction(signature)}
+    >
+      <td>{signature.slice(0, 7)}…</td>
       <td>{targetSlot || "-"}</td>
       <td>{landedSlot || "-"}</td>
       <td>{slotTiming?.numTransactions || "-"}</td>
       <td>{slotTiming?.numEntries || "-"}</td>
       <td>{slotTiming?.maxTpe || "-"}</td>
-      <td>
-        {timeElapsed(slotTiming?.firstShred, slotTiming?.fullSlot) || "-"}
-      </td>
-      <td>
-        {timeElapsed(slotTiming?.firstShred, slotTiming?.replayStart) || "-"}
-      </td>
-      <td>{timeElapsed(slotTiming?.firstShred, slotTiming?.frozen) || "-"}</td>
-      <td>{timeElapsed(slotTiming?.firstShred, slotTiming?.voted) || "-"}</td>
-      <td>
-        {timeElapsed(slotTiming?.firstShred, slotTiming?.confirmed) || "-"}
-      </td>
-      <td>{timeElapsed(slotTiming?.firstShred, slotTiming?.rooted) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, slotTiming?.firstShred) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, landedTime) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, slotTiming?.fullSlot) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, slotTiming?.replayStart) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, slotTiming?.frozen) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, slotTiming?.voted) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, slotTiming?.confirmed) || "-"}</td>
+      <td>{timeElapsed(timing?.subscribed, slotTiming?.rooted) || "-"}</td>
     </tr>
   );
 }

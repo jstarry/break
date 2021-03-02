@@ -80,7 +80,6 @@ export function SlotProvider({ children }: ProviderProps) {
 
       const slotTiming = slotMetrics.current.get(slot);
       if (!slotTiming) {
-        console.log("slot missing for notification", slot, type);
         return;
       }
 

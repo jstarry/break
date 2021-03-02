@@ -1,19 +1,19 @@
 import * as React from "react";
 import { useThrottle } from "@react-hook/throttle";
 import { TransactionSignature, PublicKey } from "@solana/web3.js";
-import { ConfirmedHelper } from "./confirmed";
+import { ConfirmedHelper, DEBUG_MODE } from "./confirmed";
 import { TpsProvider, TpsContext } from "./tps";
 import { CreateTxContext, CreateTxProvider } from "./create";
 import { SelectedTxProvider } from "./selected";
 import { useConnection } from "providers/rpc";
+import { useSlotTiming } from "providers/slot";
 
 export type ReceivedRecord = {
-  receivedAt: number;
+  timestamp: number;
   slot: number;
 };
 
 export type PendingTransaction = {
-  sentAt: number;
   targetSlot: number;
   retryId?: number;
   timeoutId?: number;
@@ -27,7 +27,7 @@ export type TransactionDetails = {
 };
 
 type Timing = {
-  sentAt: number;
+  subscribed?: number;
   processed?: number;
   confirmed?: number;
 };
@@ -42,6 +42,7 @@ type PendingState = {
   details: TransactionDetails;
   received: Array<ReceivedRecord>;
   pending: PendingTransaction;
+  timing: Timing;
 };
 
 type SuccessState = {
@@ -112,7 +113,7 @@ type TrackTransaction = {
   commitmentName: CommitmentName;
   trackingId: number;
   slot: number;
-  receivedAt: number;
+  timestamp: number;
 };
 
 type TimeoutTransaction = {
@@ -131,9 +132,22 @@ type RecordRoot = {
 
 type SignatureReceived = {
   type: "received";
+  timestamp: number;
   trackingId: number;
   slot: number;
-  receivedAt: number;
+};
+
+type SignatureSubscribed = {
+  type: "subscribed";
+  timestamp: number;
+  trackingId: number;
+  slot: number;
+};
+
+type SignatureLanded = {
+  type: "landed";
+  signatures: TransactionSignature[];
+  slots: number[];
 };
 
 type Action =
@@ -143,7 +157,9 @@ type Action =
   | ResetState
   | RecordRoot
   | TrackTransaction
-  | SignatureReceived;
+  | SignatureReceived
+  | SignatureSubscribed
+  | SignatureLanded;
 
 type State = TransactionState[];
 function reducer(state: State, action: Action): State {
@@ -157,8 +173,29 @@ function reducer(state: State, action: Action): State {
           status: "pending",
           received: [],
           pending: pendingTransaction,
+          timing: {},
         },
       ];
+    }
+
+    case "subscribed": {
+      const trackingId = action.trackingId;
+      if (trackingId >= state.length) return state;
+      const transaction = state[trackingId];
+      return state.map((tx) => {
+        if (tx.details.signature === transaction.details.signature) {
+          if (tx.status !== "timeout") {
+            return {
+              ...tx,
+              timing: {
+                ...tx.timing,
+                subscribed: action.timestamp,
+              },
+            };
+          }
+        }
+        return tx;
+      });
     }
 
     case "received": {
@@ -174,9 +211,29 @@ function reducer(state: State, action: Action): State {
                 ...tx.received,
                 {
                   slot: action.slot,
-                  receivedAt: action.receivedAt,
+                  timestamp: action.timestamp,
                 },
               ],
+            };
+          }
+        }
+        return tx;
+      });
+    }
+
+    case "landed": {
+      return state.map((tx) => {
+        if (tx.status === "success") {
+          const index = action.signatures.findIndex(
+            (val) => val === tx.details.signature
+          );
+          if (index >= 0) {
+            return {
+              ...tx,
+              slot: {
+                ...tx.slot,
+                landed: action.slots[index],
+              },
             };
           }
         }
@@ -198,36 +255,19 @@ function reducer(state: State, action: Action): State {
               received: tx.received,
               slot: {
                 target: tx.pending.targetSlot,
-                landed:
-                  action.commitmentName === "confirmed"
-                    ? action.slot
-                    : undefined,
               },
               timing: {
-                sentAt: tx.pending.sentAt,
-                [action.commitmentName]: timeElapsed(
-                  tx.pending.sentAt,
-                  action.receivedAt
-                ),
+                ...tx.timing,
+                [action.commitmentName]: action.timestamp,
               },
               pending: tx.pending,
             };
           } else if (tx.status === "success") {
             return {
               ...tx,
-              slot: {
-                ...tx.slot,
-                landed:
-                  action.commitmentName === "confirmed"
-                    ? action.slot
-                    : tx.slot.landed,
-              },
               timing: {
                 ...tx.timing,
-                [action.commitmentName]: timeElapsed(
-                  tx.timing.sentAt,
-                  action.receivedAt
-                ),
+                [action.commitmentName]: action.timestamp,
               },
             };
           }
@@ -277,9 +317,9 @@ function reducer(state: State, action: Action): State {
               landed: action.estimatedSlot,
             },
             timing: {
-              sentAt: tx.pending.sentAt,
+              ...tx.timing,
               [commitmentName]: timeElapsed(
-                tx.pending.sentAt,
+                tx.timing.subscribed,
                 action.receivedAt
               ),
             },
@@ -304,7 +344,7 @@ function reducer(state: State, action: Action): State {
               timing: {
                 ...tx.timing,
                 [commitmentName]: timeElapsed(
-                  tx.timing.sentAt,
+                  tx.timing.subscribed,
                   action.receivedAt
                 ),
               },
@@ -331,6 +371,7 @@ function reducer(state: State, action: Action): State {
               details: tx.details,
               received: tx.received,
               pending: { ...tx.pending },
+              timing: tx.timing,
             };
           }
         }
@@ -404,8 +445,38 @@ export function TransactionsProvider({ children }: ProviderProps) {
       dispatch({ type: "root", root });
     });
 
+    // Poll for signature statuses to determine which slot a tx landed in
+    const intervalId = DEBUG_MODE
+      ? setInterval(async () => {
+          const fetchStatuses: string[] = [];
+          stateRef.current.forEach((tx) => {
+            if (tx.status === "success" && tx.slot.landed === undefined) {
+              fetchStatuses.push(tx.details.signature);
+            }
+          });
+
+          if (fetchStatuses.length === 0) return;
+
+          const slots: number[] = [];
+          const signatures: TransactionSignature[] = [];
+          const statuses = (
+            await connection.getSignatureStatuses(fetchStatuses)
+          ).value;
+          for (var i = 0; i < statuses.length; i++) {
+            const status = statuses[i];
+            if (status !== null) {
+              slots.push(status.slot);
+              signatures.push(fetchStatuses[i]);
+            }
+          }
+          if (slots.length === 0) return;
+          dispatch({ type: "landed", slots, signatures });
+        }, 2000)
+      : undefined;
+
     return () => {
       connection.removeRootChangeListener(rootSubscription);
+      intervalId !== undefined && clearInterval(intervalId);
     };
   }, [connection]);
 
@@ -430,9 +501,10 @@ export function TransactionsProvider({ children }: ProviderProps) {
 }
 
 function timeElapsed(
-  sentAt: number,
-  receivedAt: number = performance.now()
-): number {
+  sentAt: number | undefined,
+  receivedAt: number | undefined
+): number | undefined {
+  if (sentAt === undefined || receivedAt === undefined) return;
   return parseFloat(((receivedAt - sentAt) / 1000).toFixed(3));
 }
 
@@ -477,6 +549,7 @@ export function useDroppedCount() {
 }
 
 export function useAvgConfirmationTime() {
+  const slotMetrics = useSlotTiming();
   const state = React.useContext(StateContext);
   if (!state) {
     throw new Error(
@@ -484,17 +557,22 @@ export function useAvgConfirmationTime() {
     );
   }
 
-  const confirmed = state.reduce((confirmed: number[], tx) => {
+  const confirmedTimes = state.reduce((confirmedTimes: number[], tx) => {
     if (tx.status === "success") {
-      const confTime = tx.timing[getCommitmentName(COMMITMENT_PARAM)];
-      if (confTime !== undefined) confirmed.push(confTime);
+      const subscribed = tx.timing.subscribed;
+      if (subscribed !== undefined && tx.slot.landed !== undefined) {
+        const slotTiming = slotMetrics.current.get(tx.slot.landed);
+        const confirmed = slotTiming?.confirmed;
+        const confTime = timeElapsed(subscribed, confirmed);
+        if (confTime) confirmedTimes.push(confTime);
+      }
     }
-    return confirmed;
+    return confirmedTimes;
   }, []);
 
-  const count = confirmed.length;
+  const count = confirmedTimes.length;
   if (count === 0) return 0;
-  const sum = confirmed.reduce((sum, time) => sum + time, 0);
+  const sum = confirmedTimes.reduce((sum, time) => sum + time, 0);
   return sum / count;
 }
 
