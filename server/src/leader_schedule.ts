@@ -6,6 +6,9 @@ type NodeAddress = string;
 // Number of upcoming slots to include when building upcoming node set
 const UPCOMING_SLOT_SEARCH = parseInt(process.env.LEADER_SLOT_FANOUT || "40");
 
+// Number of past slots to include when building upcoming node set
+const PAST_SLOT_SEARCH = parseInt(process.env.LEADER_SLOT_FANOUT || "40");
+
 // Number of slots before end of epoch used to start refreshing leader schedule
 const END_OF_EPOCH_BUFFER = 20;
 
@@ -38,9 +41,11 @@ export default class LeaderScheduleService {
       epochInfo.slotsInEpoch
     );
 
-    connection.onSlotChange((slotInfo) => {
-      if (service.shouldRefresh(slotInfo.slot)) {
-        service.refresh();
+    connection.onSlotUpdate((slotInfo) => {
+      if (slotInfo.type === "firstShredReceived") {
+        if (service.shouldRefresh(slotInfo.slot)) {
+          service.refresh();
+        }
       }
     });
 
@@ -53,7 +58,7 @@ export default class LeaderScheduleService {
     const addresses = new Set<NodeAddress>();
     for (const address in this.schedule) {
       const upcomingIndex = this.schedule[address].findIndex((slotIndex) => {
-        return slotIndex >= currentSlotIndex;
+        return slotIndex >= Math.max(currentSlotIndex - PAST_SLOT_SEARCH, 0);
       });
 
       if (upcomingIndex < 0) {
@@ -64,6 +69,7 @@ export default class LeaderScheduleService {
           this.schedule[address][0] <
           currentSlotIndex + UPCOMING_SLOT_SEARCH
         ) {
+          console.log(`include ${address} for slot ${this.schedule[address][0]} current slot index: ${currentSlotIndex}`);
           addresses.add(address);
         }
       }
